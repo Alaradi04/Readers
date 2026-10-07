@@ -9,7 +9,9 @@ import '../../../services/book_service.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key, required this.profile});
+
   final Profile profile;
+
   @override
   State<HomePage> createState() => HomePageState();
 }
@@ -19,6 +21,11 @@ class HomePageState extends State<HomePage> {
   List<Book> books = const [];
   String? genre;
   bool loading = true;
+  bool googleBooksSearch = false;
+  bool externalSearchSubmitted = false;
+  int _searchRequest = 0;
+  String? searchError;
+
   static const genres = [
     'All genres',
     'Action & Adventure',
@@ -58,17 +65,71 @@ class HomePageState extends State<HomePage> {
   }
 
   Future<void> loadBooks() async {
-    setState(() => loading = true);
-    final result = await BookService.instance.searchBooks(
-      query: search.text,
-      genre: genre,
-    );
-    if (mounted) {
+    if (googleBooksSearch && search.text.trim().isEmpty) {
       setState(() {
-        books = result;
+        books = const [];
         loading = false;
+        searchError = null;
+        externalSearchSubmitted = false;
       });
+      return;
     }
+    final request = ++_searchRequest;
+    setState(() {
+      loading = true;
+      searchError = null;
+    });
+    try {
+      final result = googleBooksSearch
+          ? await BookService.instance.searchExternalBooks(search.text)
+          : await BookService.instance.searchBooks(
+              query: search.text,
+              genre: genre,
+            );
+      if (mounted && request == _searchRequest) {
+        setState(() {
+          books = result;
+          loading = false;
+          externalSearchSubmitted = googleBooksSearch;
+        });
+      }
+    } catch (exception) {
+      if (mounted && request == _searchRequest) {
+        setState(() {
+          searchError = exception.toString().replaceFirst('Exception: ', '');
+          books = const [];
+          loading = false;
+          externalSearchSubmitted = googleBooksSearch;
+        });
+      }
+    }
+  }
+
+  void onSearchChanged(String _) {
+    if (googleBooksSearch) {
+      _searchRequest++;
+      setState(() {
+        books = const [];
+        loading = false;
+        searchError = null;
+        externalSearchSubmitted = false;
+      });
+    } else {
+      loadBooks();
+    }
+  }
+
+  void setSearchSource(bool useGoogleBooks) {
+    _searchRequest++;
+    setState(() {
+      googleBooksSearch = useGoogleBooks;
+      if (useGoogleBooks) genre = null;
+      externalSearchSubmitted = false;
+      searchError = null;
+      books = const [];
+      loading = false;
+    });
+    if (!useGoogleBooks) loadBooks();
   }
 
   void showBook(Book book) {
@@ -91,13 +152,19 @@ class HomePageState extends State<HomePage> {
               style: TextStyle(color: Colors.grey.shade700, fontSize: 16),
             ),
             const SizedBox(height: 18),
-            Row(
-              children: [
-                const Icon(Icons.star_rounded, color: AppTheme.coral),
-                const SizedBox(width: 5),
-                Text('${book.rate}/10  ·  ${book.genre}'),
-              ],
+            Text(
+              '${book.genre}${book.isbn == null ? '' : ' · ISBN ${book.isbn}'}',
             ),
+            if (!book.isExternal) ...[
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  const Icon(Icons.star_rounded, color: AppTheme.coral),
+                  const SizedBox(width: 5),
+                  Text('${book.rate}/10'),
+                ],
+              ),
+            ],
             const SizedBox(height: 22),
             Wrap(
               spacing: 8,
@@ -107,9 +174,17 @@ class HomePageState extends State<HomePage> {
                     (status) => OutlinedButton.icon(
                       onPressed: () async {
                         try {
+                          final localBook = book.isExternal
+                              ? await BookService.instance
+                                    .getOrCreateBookFromExternal(book)
+                              : book;
+                          final bookId = localBook.id;
+                          if (bookId == null) {
+                            throw StateError('Could not save this book.');
+                          }
                           await BookService.instance.updateStatus(
                             widget.profile.id,
-                            book.id,
+                            bookId,
                             status,
                           );
                           if (sheetContext.mounted) {
@@ -165,41 +240,65 @@ class HomePageState extends State<HomePage> {
             ),
           ),
           const SizedBox(height: 24),
-          TextField(
-            controller: search,
-            onChanged: (_) => loadBooks(),
-            decoration: const InputDecoration(
-              hintText: 'Search books or authors',
-              prefixIcon: Icon(Icons.search_rounded),
-            ),
+          SegmentedButton<bool>(
+            segments: const [
+              ButtonSegment(value: false, label: Text('My catalog')),
+              ButtonSegment(value: true, label: Text('Google Books')),
+            ],
+            selected: {googleBooksSearch},
+            onSelectionChanged: (selection) => setSearchSource(selection.first),
           ),
           const SizedBox(height: 14),
-          DropdownButtonFormField<String>(
-            initialValue: genre ?? genres.first,
-            decoration: const InputDecoration(
-              labelText: 'Filter by genre',
-              prefixIcon: Icon(Icons.tune_rounded),
+          TextField(
+            controller: search,
+            onChanged: onSearchChanged,
+            onSubmitted: (_) => loadBooks(),
+            decoration: InputDecoration(
+              hintText: googleBooksSearch
+                  ? 'Search Google Books'
+                  : 'Search books or authors',
+              prefixIcon: const Icon(Icons.search_rounded),
+              suffixIcon: googleBooksSearch
+                  ? IconButton(
+                      tooltip: 'Search Google Books',
+                      onPressed: loading ? null : loadBooks,
+                      icon: const Icon(Icons.search_rounded),
+                    )
+                  : null,
             ),
-            items: genres
-                .map(
-                  (item) => DropdownMenuItem(
-                    value: item,
-                    child: Text(item, overflow: TextOverflow.ellipsis),
-                  ),
-                )
-                .toList(),
-            onChanged: (value) {
-              setState(() => genre = value == genres.first ? null : value);
-              loadBooks();
-            },
           ),
+          if (!googleBooksSearch) ...[
+            const SizedBox(height: 14),
+            DropdownButtonFormField<String>(
+              initialValue: genre ?? genres.first,
+              decoration: const InputDecoration(
+                labelText: 'Filter by genre',
+                prefixIcon: Icon(Icons.tune_rounded),
+              ),
+              items: genres
+                  .map(
+                    (item) => DropdownMenuItem(
+                      value: item,
+                      child: Text(item, overflow: TextOverflow.ellipsis),
+                    ),
+                  )
+                  .toList(),
+              onChanged: (value) {
+                setState(() => genre = value == genres.first ? null : value);
+                loadBooks();
+              },
+            ),
+          ],
           const SizedBox(height: 28),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text(
-                'Top rated',
-                style: TextStyle(fontSize: 21, fontWeight: FontWeight.bold),
+              Text(
+                googleBooksSearch ? 'Google Books results' : 'Top rated',
+                style: const TextStyle(
+                  fontSize: 21,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
               Text(
                 '${books.length} books',
@@ -213,6 +312,19 @@ class HomePageState extends State<HomePage> {
               child: Padding(
                 padding: EdgeInsets.all(35),
                 child: CircularProgressIndicator(),
+              ),
+            )
+          else if (searchError != null)
+            Padding(
+              padding: const EdgeInsets.all(24),
+              child: Center(child: Text(searchError!)),
+            )
+          else if (googleBooksSearch &&
+              (!externalSearchSubmitted || search.text.trim().isEmpty))
+            const Padding(
+              padding: EdgeInsets.all(24),
+              child: Center(
+                child: Text('Enter a title, author, or ISBN and search.'),
               ),
             )
           else if (books.isEmpty)
@@ -322,16 +434,26 @@ class _BookTile extends StatelessWidget {
                   const SizedBox(height: 12),
                   Row(
                     children: [
-                      const Icon(
-                        Icons.star_rounded,
-                        color: AppTheme.coral,
-                        size: 19,
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        book.rate.toStringAsFixed(1),
-                        style: const TextStyle(fontWeight: FontWeight.bold),
-                      ),
+                      if (!book.isExternal) ...[
+                        const Icon(
+                          Icons.star_rounded,
+                          color: AppTheme.coral,
+                          size: 19,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          book.rate.toStringAsFixed(1),
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                      ] else
+                        const Text(
+                          'Google Books',
+                          style: TextStyle(
+                            color: AppTheme.forest,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
                       const Spacer(),
                       Icon(
                         Icons.arrow_forward_rounded,

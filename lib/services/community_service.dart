@@ -32,11 +32,12 @@ class CommunityService {
     if (!AppConfig.isSupabaseConfigured) return const [];
     final rows = await _client
         .from('user_library')
-        .select('status, rate, books(*)')
+      .select('id, status, rate, books(*)')
         .eq('user_id', profileId);
     return (rows as List).map((row) {
       final storedRate = row['rate'] as int?;
       return LibraryEntry(
+        userLibraryId: (row['id'] as num).toInt(),
         book: Book.fromMap(row['books'] as Map<String, dynamic>),
         status: readingStatusFromString(row['status'] as String),
         rate: storedRate == 0 ? null : storedRate,

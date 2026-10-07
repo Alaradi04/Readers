@@ -38,7 +38,7 @@ class LibraryPageState extends State<LibraryPage> {
     try {
       await BookService.instance.rateBook(
         widget.profile.id,
-        entry.book.id,
+        entry.book.id!,
         value,
       );
       await load();
@@ -55,7 +55,7 @@ class LibraryPageState extends State<LibraryPage> {
     try {
       await BookService.instance.updateStatus(
         widget.profile.id,
-        entry.book.id,
+        entry.book.id!,
         status,
       );
       await load();
@@ -66,6 +66,88 @@ class LibraryPageState extends State<LibraryPage> {
         );
       }
     }
+  }
+
+  Widget _buildStatusSection(ReadingStatus status, List<LibraryEntry> books) {
+    return DragTarget<LibraryEntry>(
+      onWillAcceptWithDetails: (details) => details.data.status != status,
+      onAcceptWithDetails: (details) => changeStatus(details.data, status),
+      builder: (context, candidates, rejected) {
+        final isHovering = candidates.isNotEmpty;
+        return AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          decoration: BoxDecoration(
+            color: isHovering ? AppTheme.mint.withValues(alpha: 0.3) : null,
+            border: isHovering ? Border.all(color: AppTheme.forest) : null,
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(top: 14, bottom: 10),
+                child: Row(
+                  children: [
+                    Text(
+                      status.label,
+                      style: const TextStyle(
+                        fontSize: 19,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    CircleAvatar(
+                      radius: 11,
+                      backgroundColor: AppTheme.mint,
+                      child: Text(
+                        '${books.length}',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: AppTheme.forest,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (books.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: Text(
+                    'Nothing here yet.',
+                    style: TextStyle(color: Colors.grey.shade600),
+                  ),
+                )
+              else
+                ...books.map(
+                  (entry) => _LibraryBookCard(
+                    entry: entry,
+                    onOpenNotes:
+                        status == ReadingStatus.currentlyReading ||
+                            status == ReadingStatus.read
+                        ? () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => BookNotesPage(
+                                userLibraryId: entry.userLibraryId,
+                                book: entry.book,
+                              ),
+                            ),
+                          )
+                        : null,
+                    onStatusChanged: (newStatus) =>
+                        changeStatus(entry, newStatus),
+                    onRemove: () => removeFromLibrary(entry),
+                    onRate: status == ReadingStatus.read
+                        ? () => rate(entry)
+                        : null,
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   Future<void> removeFromLibrary(LibraryEntry entry) async {
@@ -95,7 +177,7 @@ class LibraryPageState extends State<LibraryPage> {
     try {
       await BookService.instance.removeFromLibrary(
         widget.profile.id,
-        entry.book.id,
+        entry.book.id!,
       );
       await load();
     } catch (exception) {
@@ -124,75 +206,17 @@ class LibraryPageState extends State<LibraryPage> {
               '${entries.length} books in your reading life',
               style: TextStyle(color: Colors.grey.shade600),
             ),
+            const SizedBox(height: 4),
+            Text(
+              'Swipe to move one status, or long-press and drag to any status.',
+              style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+            ),
             const SizedBox(height: 24),
             ...ReadingStatus.values.map((status) {
               final books = entries
                   .where((entry) => entry.status == status)
                   .toList();
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.only(top: 14, bottom: 10),
-                    child: Row(
-                      children: [
-                        Text(
-                          status.label,
-                          style: const TextStyle(
-                            fontSize: 19,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        CircleAvatar(
-                          radius: 11,
-                          backgroundColor: AppTheme.mint,
-                          child: Text(
-                            '${books.length}',
-                            style: const TextStyle(
-                              fontSize: 12,
-                              color: AppTheme.forest,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  if (books.isEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 10),
-                      child: Text(
-                        'Nothing here yet.',
-                        style: TextStyle(color: Colors.grey.shade600),
-                      ),
-                    )
-                  else
-                    ...books.map(
-                      (entry) => _LibraryBookCard(
-                        entry: entry,
-                        onOpenNotes:
-                            status == ReadingStatus.currentlyReading ||
-                                status == ReadingStatus.read
-                            ? () => Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) => BookNotesPage(
-                                    userId: widget.profile.id,
-                                    book: entry.book,
-                                  ),
-                                ),
-                              )
-                            : null,
-                        onStatusChanged: (newStatus) =>
-                            changeStatus(entry, newStatus),
-                        onRemove: () => removeFromLibrary(entry),
-                        onRate: status == ReadingStatus.read
-                            ? () => rate(entry)
-                            : null,
-                      ),
-                    ),
-                ],
-              );
+              return _buildStatusSection(status, books);
             }),
           ],
         ),
@@ -253,7 +277,7 @@ class _RatingDialogState extends State<_RatingDialog> {
   }
 }
 
-class _LibraryBookCard extends StatelessWidget {
+class _LibraryBookCard extends StatefulWidget {
   const _LibraryBookCard({
     required this.entry,
     required this.onOpenNotes,
@@ -269,106 +293,161 @@ class _LibraryBookCard extends StatelessWidget {
   final VoidCallback? onRate;
 
   @override
+  State<_LibraryBookCard> createState() => _LibraryBookCardState();
+}
+
+class _LibraryBookCardState extends State<_LibraryBookCard> {
+  double _dragDistance = 0;
+
+  @override
   Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) => LongPressDraggable<LibraryEntry>(
+        data: widget.entry,
+        feedback: Material(
+          color: Colors.transparent,
+          child: SizedBox(
+            width: constraints.maxWidth,
+            child: _buildCard(context),
+          ),
+        ),
+        childWhenDragging: Opacity(opacity: 0.35, child: _buildCard(context)),
+        child: _buildCard(context),
+      ),
+    );
+  }
+
+  Widget _buildCard(BuildContext context) {
     final otherStatuses = ReadingStatus.values
-        .where((status) => status != entry.status)
+        .where((status) => status != widget.entry.status)
         .toList();
-    return Card(
-      margin: const EdgeInsets.only(bottom: 10),
-      elevation: 0,
-      color: Colors.white,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-      child: InkWell(
-        onTap: onOpenNotes,
-        borderRadius: BorderRadius.circular(14),
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Row(
-            children: [
-              BookCover(picture: entry.book.picture, width: 58, height: 76),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      entry.book.title,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
-                      ),
-                    ),
-                    const SizedBox(height: 5),
-                    Text(
-                      entry.book.author,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(color: Colors.grey.shade700),
-                    ),
-                    const SizedBox(height: 7),
-                    Text(
-                      entry.book.genre,
-                      style: const TextStyle(
-                        color: AppTheme.forest,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
+    return GestureDetector(
+      onHorizontalDragStart: (_) => _dragDistance = 0,
+      onHorizontalDragUpdate: (details) {
+        _dragDistance += details.delta.dx;
+      },
+      onHorizontalDragEnd: (details) {
+        final dragDistance = _dragDistance;
+        _dragDistance = 0;
+        final velocity = details.primaryVelocity ?? 0;
+        if (dragDistance.abs() < 48 && velocity.abs() < 400) return;
+
+        final direction = dragDistance.abs() >= 48
+            ? dragDistance.sign
+            : velocity.sign;
+        final statusIndex = ReadingStatus.values.indexOf(widget.entry.status);
+        final targetIndex = statusIndex + (direction < 0 ? 1 : -1);
+        if (targetIndex >= 0 && targetIndex < ReadingStatus.values.length) {
+          widget.onStatusChanged(ReadingStatus.values[targetIndex]);
+        }
+      },
+      child: Card(
+        margin: const EdgeInsets.only(bottom: 10),
+        elevation: 0,
+        color: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        child: InkWell(
+          onTap: widget.onOpenNotes,
+          borderRadius: BorderRadius.circular(14),
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Row(
+              children: [
+                BookCover(
+                  picture: widget.entry.book.picture,
+                  width: 58,
+                  height: 76,
                 ),
-              ),
-              Column(
-                children: [
-                  if (onOpenNotes != null)
-                    IconButton(
-                      tooltip: 'Open book notes',
-                      onPressed: onOpenNotes,
-                      icon: const Icon(Icons.sticky_note_2_outlined),
-                      color: AppTheme.forest,
-                    ),
-                  if (onRate != null)
-                    IconButton(
-                      tooltip: 'Rate book',
-                      onPressed: onRate,
-                      icon: Icon(
-                        entry.rate == null
-                            ? Icons.star_border_rounded
-                            : Icons.star_rounded,
-                        color: AppTheme.coral,
-                      ),
-                    ),
-                  PopupMenuButton<Object>(
-                    tooltip: 'Move book',
-                    icon: const Icon(Icons.more_vert_rounded),
-                    onSelected: (action) {
-                      if (action is ReadingStatus) onStatusChanged(action);
-                      if (action == _LibraryBookAction.remove) onRemove();
-                    },
-                    itemBuilder: (context) => [
-                      ...otherStatuses.map(
-                        (status) => PopupMenuItem<Object>(
-                          value: status,
-                          child: Text('Move to ${status.label.toLowerCase()}'),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        widget.entry.book.title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
                         ),
                       ),
-                      const PopupMenuDivider(),
-                      const PopupMenuItem<Object>(
-                        value: _LibraryBookAction.remove,
-                        child: Row(
-                          children: [
-                            Icon(Icons.delete_outline_rounded),
-                            SizedBox(width: 12),
-                            Text('Remove from library'),
-                          ],
+                      const SizedBox(height: 5),
+                      Text(
+                        widget.entry.book.author,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(color: Colors.grey.shade700),
+                      ),
+                      const SizedBox(height: 7),
+                      Text(
+                        widget.entry.book.genre,
+                        style: const TextStyle(
+                          color: AppTheme.forest,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
                     ],
                   ),
-                ],
-              ),
-            ],
+                ),
+                Column(
+                  children: [
+                    if (widget.onOpenNotes != null)
+                      IconButton(
+                        tooltip: 'Open book notes',
+                        onPressed: widget.onOpenNotes,
+                        icon: const Icon(Icons.sticky_note_2_outlined),
+                        color: AppTheme.forest,
+                      ),
+                    if (widget.onRate != null)
+                      IconButton(
+                        tooltip: 'Rate book',
+                        onPressed: widget.onRate,
+                        icon: Icon(
+                          widget.entry.rate == null
+                              ? Icons.star_border_rounded
+                              : Icons.star_rounded,
+                          color: AppTheme.coral,
+                        ),
+                      ),
+                    PopupMenuButton<Object>(
+                      tooltip: 'Move book',
+                      icon: const Icon(Icons.more_vert_rounded),
+                      onSelected: (action) {
+                        if (action is ReadingStatus) {
+                          widget.onStatusChanged(action);
+                        }
+                        if (action == _LibraryBookAction.remove) {
+                          widget.onRemove();
+                        }
+                      },
+                      itemBuilder: (context) => [
+                        ...otherStatuses.map(
+                          (status) => PopupMenuItem<Object>(
+                            value: status,
+                            child: Text(
+                              'Move to ${status.label.toLowerCase()}',
+                            ),
+                          ),
+                        ),
+                        const PopupMenuDivider(),
+                        const PopupMenuItem<Object>(
+                          value: _LibraryBookAction.remove,
+                          child: Row(
+                            children: [
+                              Icon(Icons.delete_outline_rounded),
+                              SizedBox(width: 12),
+                              Text('Remove from library'),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
         ),
       ),

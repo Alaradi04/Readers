@@ -31,6 +31,7 @@ class BookCover extends StatelessWidget {
                 width: width,
                 height: height,
                 fit: BoxFit.contain,
+              webHtmlElementStrategy: WebHtmlElementStrategy.prefer,
                 errorBuilder: (context, error, stackTrace) =>
                     const Icon(Icons.menu_book_rounded, color: AppTheme.forest),
               ),

@@ -23,7 +23,14 @@ ReadingStatus readingStatusFromString(String value) => switch (value) {
     };
 
 class LibraryEntry {
-  const LibraryEntry({required this.book, required this.status, this.rate});
+  const LibraryEntry({
+    required this.userLibraryId,
+    required this.book,
+    required this.status,
+    this.rate,
+  });
+
+  final int userLibraryId;
   final Book book;
   final ReadingStatus status;
   final int? rate;

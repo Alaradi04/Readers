@@ -1,0 +1,17 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Run Readers on web-server",
+      "type": "process",
+      "command": "flutter",
+      "args": [
+        "run",
+        "-d",
+        "web-server",
+        "--dart-define=GOOGLE_BOOKS_API_KEY=${env:GOOGLE_BOOKS_API_KEY}"
+      ],
+      "problemMatcher": []
+    }
+  ]
+}

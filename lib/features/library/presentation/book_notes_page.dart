@@ -6,9 +6,13 @@ import '../../../models/user_note.dart';
 import '../../../services/book_service.dart';
 
 class BookNotesPage extends StatefulWidget {
-  const BookNotesPage({super.key, required this.userId, required this.book});
+  const BookNotesPage({
+    super.key,
+    required this.userLibraryId,
+    required this.book,
+  });
 
-  final String userId;
+  final int userLibraryId;
   final Book book;
 
   @override
@@ -44,8 +48,7 @@ class _BookNotesPageState extends State<BookNotesPage> {
     });
     try {
       final notes = await BookService.instance.getBookNotes(
-        widget.userId,
-        widget.book.id,
+        widget.userLibraryId,
       );
       if (mounted) setState(() => _notes = notes);
     } catch (exception) {
@@ -60,8 +63,7 @@ class _BookNotesPageState extends State<BookNotesPage> {
     setState(() => _saving = true);
     try {
       await BookService.instance.addBookNote(
-        userId: widget.userId,
-        bookId: widget.book.id,
+        userLibraryId: widget.userLibraryId,
         title: _titleController.text.trim(),
         note: _noteController.text.trim(),
       );
@@ -88,8 +90,7 @@ class _BookNotesPageState extends State<BookNotesPage> {
     setState(() => _saving = true);
     try {
       await BookService.instance.updateBookNote(
-        userId: widget.userId,
-        bookId: widget.book.id,
+        userLibraryId: widget.userLibraryId,
         noteId: note.id,
         title: draft.title,
         note: draft.note,
@@ -131,8 +132,7 @@ class _BookNotesPageState extends State<BookNotesPage> {
     setState(() => _saving = true);
     try {
       await BookService.instance.deleteBookNote(
-        userId: widget.userId,
-        bookId: widget.book.id,
+        userLibraryId: widget.userLibraryId,
         noteId: note.id,
       );
       await _loadNotes();

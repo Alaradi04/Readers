@@ -24,6 +24,10 @@ class AdminPageState extends State<AdminPage> {
   int? bookCount;
   bool loadingBooks = true;
   bool loadingProfiles = true;
+  bool googleBooksSearch = false;
+  bool externalSearchSubmitted = false;
+  int _bookSearchRequest = 0;
+  String? importingGoogleBooksId;
   String? error;
   String? profileError;
 
@@ -61,25 +65,82 @@ class AdminPageState extends State<AdminPage> {
   }
 
   Future<void> loadBooks() async {
+    if (googleBooksSearch && search.text.trim().isEmpty) {
+      setState(() {
+        books = const [];
+        loadingBooks = false;
+        error = null;
+        externalSearchSubmitted = false;
+      });
+      return;
+    }
+    final request = ++_bookSearchRequest;
     setState(() {
       loadingBooks = true;
       error = null;
     });
     try {
-      final result = await BookService.instance.searchBooks(query: search.text);
-      if (mounted) {
+      final result = googleBooksSearch
+          ? await BookService.instance.searchExternalBooks(search.text)
+          : await BookService.instance.searchBooks(query: search.text);
+      if (mounted && request == _bookSearchRequest) {
         setState(() {
           books = result;
           loadingBooks = false;
+          externalSearchSubmitted = googleBooksSearch;
         });
       }
     } catch (exception) {
-      if (mounted) {
+      if (mounted && request == _bookSearchRequest) {
         setState(() {
           error = 'Could not load books: $exception';
+          books = const [];
           loadingBooks = false;
+          externalSearchSubmitted = googleBooksSearch;
         });
       }
+    }
+  }
+
+  void _onBookSearchChanged(String _) {
+    if (googleBooksSearch) {
+      _bookSearchRequest++;
+      setState(() {
+        books = const [];
+        loadingBooks = false;
+        error = null;
+        externalSearchSubmitted = false;
+      });
+    } else {
+      loadBooks();
+    }
+  }
+
+  void _setBookSearchSource(bool useGoogleBooks) {
+    _bookSearchRequest++;
+    setState(() {
+      googleBooksSearch = useGoogleBooks;
+      books = const [];
+      loadingBooks = false;
+      error = null;
+      externalSearchSubmitted = false;
+    });
+    if (!useGoogleBooks) loadBooks();
+  }
+
+  Future<void> _importExternalBook(Book book) async {
+    final googleBooksId = book.googleBooksId;
+    if (googleBooksId == null || importingGoogleBooksId != null) return;
+    setState(() => importingGoogleBooksId = googleBooksId);
+    try {
+      await BookService.instance.getOrCreateBookFromExternal(book);
+      final stats = await BookService.instance.getAdminStats();
+      if (mounted) setState(() => bookCount = stats['books']);
+      if (mounted) _showMessage('Book added to the catalog.');
+    } catch (exception) {
+      if (mounted) _showMessage('Could not import book: $exception');
+    } finally {
+      if (mounted) setState(() => importingGoogleBooksId = null);
     }
   }
 
@@ -137,6 +198,7 @@ class AdminPageState extends State<AdminPage> {
     try {
       if (book == null) {
         await BookService.instance.createBook(
+          isbn: values.isbn,
           title: values.title,
           author: values.author,
           genre: values.genre,
@@ -144,7 +206,8 @@ class AdminPageState extends State<AdminPage> {
         );
       } else {
         await BookService.instance.updateBook(
-          book.id,
+          book.id!,
+          isbn: values.isbn,
           title: values.title,
           author: values.author,
           genre: values.genre,
@@ -179,7 +242,7 @@ class AdminPageState extends State<AdminPage> {
     );
     if (confirmed != true) return;
     try {
-      await BookService.instance.deleteBook(book.id);
+      await BookService.instance.deleteBook(book.id!);
       await reload();
       if (mounted) _showMessage('Book removed.');
     } catch (exception) {
@@ -241,11 +304,20 @@ class AdminPageState extends State<AdminPage> {
           const SizedBox(height: 10),
           TextField(
             controller: search,
-            onChanged: (_) => loadBooks(),
+            onChanged: _onBookSearchChanged,
+            onSubmitted: (_) => loadBooks(),
             decoration: InputDecoration(
-              hintText: 'Search books or authors',
+              hintText: googleBooksSearch
+                  ? 'Search Google Books'
+                  : 'Search books or authors',
               prefixIcon: const Icon(Icons.search_rounded),
-              suffixIcon: search.text.isEmpty
+              suffixIcon: googleBooksSearch
+                  ? IconButton(
+                      tooltip: 'Search Google Books',
+                      onPressed: loadingBooks ? null : loadBooks,
+                      icon: const Icon(Icons.search_rounded),
+                    )
+                  : search.text.isEmpty
                   ? null
                   : IconButton(
                       tooltip: 'Clear search',
@@ -256,6 +328,16 @@ class AdminPageState extends State<AdminPage> {
                       icon: const Icon(Icons.close_rounded),
                     ),
             ),
+          ),
+          const SizedBox(height: 10),
+          SegmentedButton<bool>(
+            segments: const [
+              ButtonSegment(value: false, label: Text('Catalog')),
+              ButtonSegment(value: true, label: Text('Google Books')),
+            ],
+            selected: {googleBooksSearch},
+            onSelectionChanged: (selection) =>
+                _setBookSearchSource(selection.first),
           ),
           if (error != null) ...[
             const SizedBox(height: 12),
@@ -281,8 +363,12 @@ class AdminPageState extends State<AdminPage> {
             ...books.map(
               (book) => _AdminBookTile(
                 book: book,
-                onEdit: () => editBook(book),
-                onRemove: () => removeBook(book),
+                onEdit: googleBooksSearch ? null : () => editBook(book),
+                onRemove: googleBooksSearch ? null : () => removeBook(book),
+                onImport: googleBooksSearch
+                    ? () => _importExternalBook(book)
+                    : null,
+                importing: importingGoogleBooksId == book.googleBooksId,
               ),
             ),
           const SizedBox(height: 26),
@@ -384,11 +470,15 @@ class _AdminBookTile extends StatelessWidget {
     required this.book,
     required this.onEdit,
     required this.onRemove,
+    this.onImport,
+    this.importing = false,
   });
 
   final Book book;
-  final VoidCallback onEdit;
-  final VoidCallback onRemove;
+  final VoidCallback? onEdit;
+  final VoidCallback? onRemove;
+  final VoidCallback? onImport;
+  final bool importing;
 
   @override
   Widget build(BuildContext context) => Card(
@@ -465,19 +555,32 @@ class _AdminBookTile extends StatelessWidget {
           const SizedBox(width: 4),
           Column(
             mainAxisSize: MainAxisSize.min,
-            children: [
-              IconButton(
-                tooltip: 'Edit book',
-                onPressed: onEdit,
-                icon: const Icon(Icons.edit_outlined),
-              ),
-              IconButton(
-                tooltip: 'Remove book',
-                onPressed: onRemove,
-                color: Theme.of(context).colorScheme.error,
-                icon: const Icon(Icons.delete_outline_rounded),
-              ),
-            ],
+            children: onImport != null
+                ? [
+                    IconButton(
+                      tooltip: 'Add to catalog',
+                      onPressed: importing ? null : onImport,
+                      icon: importing
+                          ? const SizedBox.square(
+                              dimension: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.library_add_outlined),
+                    ),
+                  ]
+                : [
+                    IconButton(
+                      tooltip: 'Edit book',
+                      onPressed: onEdit,
+                      icon: const Icon(Icons.edit_outlined),
+                    ),
+                    IconButton(
+                      tooltip: 'Remove book',
+                      onPressed: onRemove,
+                      color: Theme.of(context).colorScheme.error,
+                      icon: const Icon(Icons.delete_outline_rounded),
+                    ),
+                  ],
           ),
         ],
       ),
@@ -568,12 +671,14 @@ class _AdminProfileCard extends StatelessWidget {
 
 class _BookValues {
   const _BookValues({
+    required this.isbn,
     required this.title,
     required this.author,
     required this.genre,
     this.pictureFile,
   });
 
+  final String isbn;
   final String title;
   final String author;
   final String genre;
@@ -594,11 +699,13 @@ class _BookEditorDialogState extends State<_BookEditorDialog> {
   late final TextEditingController title;
   late final TextEditingController author;
   late final TextEditingController genre;
+  late final TextEditingController isbn;
   PlatformFile? pictureFile;
 
   @override
   void initState() {
     super.initState();
+    isbn = TextEditingController(text: widget.book?.isbn ?? '');
     title = TextEditingController(text: widget.book?.title ?? '');
     author = TextEditingController(text: widget.book?.author ?? '');
     genre = TextEditingController(text: widget.book?.genre ?? '');
@@ -606,6 +713,7 @@ class _BookEditorDialogState extends State<_BookEditorDialog> {
 
   @override
   void dispose() {
+    isbn.dispose();
     title.dispose();
     author.dispose();
     genre.dispose();
@@ -659,6 +767,11 @@ class _BookEditorDialogState extends State<_BookEditorDialog> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              TextFormField(
+                controller: isbn,
+                decoration: const InputDecoration(labelText: 'ISBN (optional)'),
+              ),
+              const SizedBox(height: 12),
               TextFormField(
                 controller: title,
                 validator: _required,
@@ -720,6 +833,7 @@ class _BookEditorDialogState extends State<_BookEditorDialog> {
           Navigator.pop(
             context,
             _BookValues(
+              isbn: isbn.text.trim(),
               title: title.text,
               author: author.text,
               genre: genre.text,
