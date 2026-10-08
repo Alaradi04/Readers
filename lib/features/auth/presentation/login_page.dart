@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../models/profile.dart';
 import '../../../services/auth_service.dart';
@@ -16,10 +19,31 @@ class _LoginPageState extends State<LoginPage> {
   final password = TextEditingController();
   bool isRegistering = false;
   bool loading = false;
+  bool openingHome = false;
   String? error;
+  StreamSubscription<AuthState>? authSubscription;
+
+  @override
+  void initState() {
+    super.initState();
+    if (!AuthService.instance.isDemoMode) {
+      authSubscription = Supabase.instance.client.auth.onAuthStateChange.listen(
+        (state) {
+          if (state.event == AuthChangeEvent.signedIn ||
+              state.event == AuthChangeEvent.initialSession) {
+            _restoreSignedInUser();
+          }
+        },
+        onError: (Object exception) {
+          if (mounted) setState(() => error = _friendlyError(exception));
+        },
+      );
+    }
+  }
 
   @override
   void dispose() {
+    authSubscription?.cancel();
     username.dispose();
     identifier.dispose();
     password.dispose();
@@ -52,15 +76,46 @@ class _LoginPageState extends State<LoginPage> {
               password.text,
             );
       if (mounted) {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => HomeShell(profile: profile)),
-        );
+        _openHome(profile);
       }
     } catch (exception) {
       if (mounted) setState(() => error = _friendlyError(exception));
     } finally {
       if (mounted) setState(() => loading = false);
     }
+  }
+
+  Future<void> signInWithGoogle() async {
+    setState(() {
+      loading = true;
+      error = null;
+    });
+    try {
+      await AuthService.instance.signInWithGoogle();
+    } catch (exception) {
+      if (mounted) setState(() => error = _friendlyError(exception));
+    } finally {
+      if (mounted) setState(() => loading = false);
+    }
+  }
+
+  Future<void> _restoreSignedInUser() async {
+    if (openingHome) return;
+    try {
+      final profile = await AuthService.instance.getCurrentProfile();
+      if (profile != null && mounted) _openHome(profile);
+    } catch (exception) {
+      if (mounted) setState(() => error = _friendlyError(exception));
+    }
+  }
+
+  void _openHome(Profile profile) {
+    if (openingHome || !mounted) return;
+    openingHome = true;
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => HomeShell(profile: profile)),
+      (_) => false,
+    );
   }
 
   String _friendlyError(Object exception) {
@@ -169,6 +224,16 @@ class _LoginPageState extends State<LoginPage> {
                     child: loading
                         ? const CircularProgressIndicator()
                         : Text(isRegistering ? 'Create account' : 'Sign in'),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                SizedBox(
+                  width: double.infinity,
+                  height: 52,
+                  child: OutlinedButton.icon(
+                    onPressed: loading ? null : signInWithGoogle,
+                    icon: const Icon(Icons.account_circle_outlined),
+                    label: const Text('Continue with Google'),
                   ),
                 ),
                 const SizedBox(height: 14),

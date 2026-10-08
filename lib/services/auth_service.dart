@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -58,6 +59,26 @@ class AuthService {
         'Account created. Check your email, confirm your account, then sign in.',
       );
     }
+    return _getProfile(user);
+  }
+
+  Future<void> signInWithGoogle() async {
+    if (isDemoMode) {
+      throw Exception('Google sign-in requires a Supabase connection.');
+    }
+    final launched = await _client.auth.signInWithOAuth(
+      OAuthProvider.google,
+      redirectTo: kIsWeb ? Uri.base.origin : 'readers://login-callback/',
+    );
+    if (!launched) {
+      throw Exception('Could not start Google sign-in.');
+    }
+  }
+
+  Future<Profile?> getCurrentProfile() async {
+    if (isDemoMode) return null;
+    final user = _client.auth.currentUser;
+    if (user == null) return null;
     return _getProfile(user);
   }
 
