@@ -232,7 +232,11 @@ class _LoginPageState extends State<LoginPage> {
                   height: 52,
                   child: OutlinedButton.icon(
                     onPressed: loading ? null : signInWithGoogle,
-                    icon: const Icon(Icons.account_circle_outlined),
+                    icon: Image.asset(
+                      'assets/google.png',
+                      width: 20,
+                      height: 20,
+                    ),
                     label: const Text('Continue with Google'),
                   ),
                 ),
